@@ -1,0 +1,38 @@
+tests:
+  - name: TEST_PING_RTT
+    title: RTT
+
+  - name: TEST_PING_SD_RTT
+    title: RTT标准差
+
+  - name: TEST_PING_MAX_RTT
+    title: MAX RTT
+
+  - name: TEST_PING_CONN
+    title: HTTPS延迟
+
+  - name: SPEED_PER_SECOND
+    title: 速度
+
+  - name: UDP_TYPE
+    title: UDP类型
+
+  - name: TEST_SCRIPT
+    title: Youtube
+    kind: script
+    script_name: Youtube
+
+  - name: TEST_SCRIPT
+    title: Disney+
+    kind: script
+    script_name: Disney+
+
+  - name: TEST_SCRIPT
+    title: OpenAI
+    kind: script
+    script_name: OpenAI
+
+  - name: TEST_SCRIPT
+    title: Claude
+    kind: script
+    script_name: Claude
