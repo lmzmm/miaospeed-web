@@ -1,104 +1,93 @@
+# renderer.py
+
 from __future__ import annotations
 
+import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from models import TableResult, TestResult
+from models import Cell, TableResult, TestResult
 
-
-# ============================================================
-# 基础配置
-# ============================================================
 
 RESULT_DIR = Path("results")
+
+
+# ============================================================
+# 颜色
+# ============================================================
 
 BACKGROUND = "#FFFFFF"
 HEADER_BACKGROUND = "#EAEAEA"
 BORDER_COLOR = "#D5D5D5"
 
 TEXT_COLOR = "#222222"
-SECONDARY_TEXT_COLOR = "#555555"
+SECONDARY_TEXT_COLOR = "#666666"
 
-# RTT
 RTT_GOOD = "#BEE47E"
 RTT_NORMAL = "#FCC43C"
 RTT_BAD = "#EE6B73"
 RTT_UNKNOWN = "#8D8B8E"
 
-# Speed
 SPEED_LOW = "#FAE0E4"
 SPEED_MEDIUM = "#FF85A1"
 SPEED_HIGH = "#FF477E"
+
+# 折线图
+CHART_LINE_COLOR = "#FF477E"
+CHART_POINT_COLOR = "#FF477E"
+CHART_GRID_COLOR = "#E5E5E5"
+CHART_AVG_COLOR = "#999999"
+CHART_MAX_COLOR = "#FF85A1"
 
 
 # ============================================================
 # 尺寸
 # ============================================================
 
-ROW_HEIGHT = 56
+ROW_HEIGHT = 64
 HEADER_HEIGHT = 64
-TITLE_HEIGHT = 70
-FOOTER_HEIGHT = 70
+TITLE_HEIGHT = 72
+FOOTER_HEIGHT = 72
 
 PADDING_X = 12
 
-# 普通字体
-FONT_SIZE = 22
-
-# 小字体
 SMALL_FONT_SIZE = 14
-
-# 最小字体
-MIN_SPEED_FONT_SIZE = 8
-
 TITLE_FONT_SIZE = 30
 
+# 每秒速度折线图
+CHART_PADDING_LEFT = 30
+CHART_PADDING_RIGHT = 8
+CHART_PADDING_TOP = 8
+CHART_PADDING_BOTTOM = 12
 
-# ============================================================
-# 列宽
-# ============================================================
-
+# 固定列宽
 COLUMN_WIDTHS = {
     "序号": 70,
-
     "节点名称": 360,
-
     "类型": 140,
 
     "RTT": 130,
-
     "RTT标准差": 130,
-
     "MAX RTT": 130,
-
     "连接标准差": 130,
-
     "HTTPS延迟": 140,
-
     "HTTP(S)延迟": 140,
-
     "TLS RTT": 130,
-
     "总RTT": 130,
-
     "总连接数": 130,
-
     "HTTP状态码": 130,
 
     "平均速度": 150,
-
     "最大速度": 150,
 
-    # 整个“每秒速度”区域
     "每秒速度": 500,
 
     "UDP类型": 160,
-
     "入口GeoIP": 160,
-
     "出口GeoIP": 160,
 }
 
@@ -107,222 +96,327 @@ COLUMN_WIDTHS = {
 # 字体
 # ============================================================
 
-def load_font(size: int):
+def load_font(
+    size: int,
+    bold: bool = False,
+):
+    candidates = []
 
-    candidates = [
+    if bold:
+        candidates.extend([
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ])
+    else:
+        candidates.extend([
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        ])
 
-        # Windows
-        Path(
-            "C:/Windows/Fonts/msyh.ttc"
-        ),
-
-        Path(
-            "C:/Windows/Fonts/msyhbd.ttc"
-        ),
-
-        Path(
-            "C:/Windows/Fonts/simhei.ttf"
-        ),
-
-        # Linux
-        Path(
-            "/usr/share/fonts/opentype/noto/"
-            "NotoSansCJK-Regular.ttc"
-        ),
-
-        Path(
-            "/usr/share/fonts/opentype/noto/"
-            "NotoSansCJK-Regular.otf"
-        ),
-
-        Path(
-            "/usr/share/fonts/truetype/wqy/"
-            "wqy-zenhei.ttc"
-        ),
-    ]
+    # Windows
+    if bold:
+        candidates.extend([
+            "C:/Windows/Fonts/msyhbd.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+        ])
+    else:
+        candidates.extend([
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+        ])
 
     for path in candidates:
-
-        if not path.exists():
-            continue
-
         try:
-
             return ImageFont.truetype(
-                str(path),
-                size,
+                path,
+                size=size,
             )
-
-        except OSError:
-
+        except Exception:
             continue
-
-    print(
-        "警告：未找到中文字体，"
-        "PNG 中中文可能无法正常显示。"
-    )
 
     return ImageFont.load_default()
 
 
+SMALL_FONT = load_font(
+    SMALL_FONT_SIZE
+)
+
+TITLE_FONT = load_font(
+    TITLE_FONT_SIZE,
+    bold=True,
+)
+
+
 # ============================================================
-# 文本
+# 工具
 # ============================================================
 
-def value_to_text(
+def safe_str(
     value: Any,
 ) -> str:
 
     if value is None:
         return "-"
 
-    if isinstance(
-        value,
-        list,
-    ):
-
-        return " ".join(
-            str(x)
-            for x in value
-        )
+    if isinstance(value, str):
+        return value
 
     return str(value)
 
 
-def text_width(
-    draw: ImageDraw.ImageDraw,
-    text: Any,
-    font,
-) -> int:
+def get_value(
+    cell: Cell | Any,
+) -> Any:
 
-    bbox = draw.textbbox(
-        (0, 0),
-        str(text),
-        font=font,
-    )
+    if isinstance(cell, Cell):
+        return cell.raw
 
-    return (
-        bbox[2]
-        - bbox[0]
-    )
+    return cell
 
 
-# ============================================================
-# 速度格式化
-# ============================================================
+def get_display_value(
+    cell: Cell | Any,
+) -> Any:
 
-def format_speed_text(
+    if isinstance(cell, Cell):
+        return cell.display
+
+    return cell
+
+
+def numeric_value(
     value: Any,
+) -> float | None:
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(
+        value,
+        (int, float),
+    ):
+        number = float(value)
+
+        if math.isfinite(number):
+            return number
+
+        return None
+
+    try:
+
+        text = str(
+            value
+        ).strip()
+
+        if not text:
+            return None
+
+        for suffix in (
+            "MB/s",
+            "MiB/s",
+            "KB/s",
+            "KiB/s",
+            "B/s",
+            "MB",
+            "MiB",
+            "KB",
+            "KiB",
+            "B",
+            "ms",
+        ):
+            if text.endswith(suffix):
+                text = text[
+                    :-len(suffix)
+                ].strip()
+                break
+
+        number = float(text)
+
+        if math.isfinite(number):
+            return number
+
+    except Exception:
+        pass
+
+    return None
+
+
+def human_size(
+    value: float | int | None,
 ) -> str:
 
     if value is None:
         return "-"
 
-    try:
+    value = float(
+        value
+    )
 
-        value = float(value)
+    if value < 1024:
+        return f"{value:.0f}B"
 
-    except (
-        TypeError,
-        ValueError,
+    value /= 1024
+
+    if value < 1024:
+        return f"{value:.2f}KB"
+
+    value /= 1024
+
+    if value < 1024:
+        return f"{value:.2f}MB"
+
+    value /= 1024
+
+    return f"{value:.2f}GB"
+
+
+def fit_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    max_width: int,
+    font,
+) -> str:
+
+    text = safe_str(
+        text
+    )
+
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
+    )
+
+    if (
+        bbox[2] - bbox[0]
+        <= max_width
     ):
+        return text
 
-        return str(value)
+    ellipsis = "..."
+    current = ""
 
-    if value < 0:
-        return "-"
+    for char in text:
 
-    units = [
-        "B",
-        "KB",
-        "MB",
-        "GB",
-        "TB",
-        "PB",
-    ]
+        candidate = (
+            current
+            + char
+            + ellipsis
+        )
 
-    index = 0
+        bbox = draw.textbbox(
+            (0, 0),
+            candidate,
+            font=font,
+        )
 
-    while (
-        value >= 1024
-        and index < len(units) - 1
-    ):
+        if (
+            bbox[2] - bbox[0]
+            > max_width
+        ):
+            break
 
-        value /= 1024
-        index += 1
+        current += char
 
-    return (
-        f"{value:.2f}"
-        f"{units[index]}"
+    return current + ellipsis
+
+
+def centered_text(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    text: str,
+    font,
+    fill=TEXT_COLOR,
+):
+
+    x1, y1, x2, y2 = box
+
+    bbox = draw.textbbox(
+        (0, 0),
+        text,
+        font=font,
+    )
+
+    text_width = (
+        bbox[2] - bbox[0]
+    )
+
+    text_height = (
+        bbox[3] - bbox[1]
+    )
+
+    x = (
+        x1
+        + (
+            x2 - x1 - text_width
+        ) / 2
+    )
+
+    y = (
+        y1
+        + (
+            y2 - y1 - text_height
+        ) / 2
+        - bbox[1]
+    )
+
+    draw.text(
+        (x, y),
+        text,
+        font=font,
+        fill=fill,
     )
 
 
 # ============================================================
-# RTT颜色
+# 颜色
 # ============================================================
 
-def rtt_color(
+def rtt_background(
     value: Any,
 ) -> str:
 
-    try:
+    number = numeric_value(
+        value
+    )
 
-        value = float(value)
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-
+    if number is None:
         return RTT_UNKNOWN
 
-    if value <= 0:
-        return RTT_UNKNOWN
-
-    if value <= 50:
+    if number <= 100:
         return RTT_GOOD
 
-    if value <= 200:
+    if number <= 300:
         return RTT_NORMAL
 
     return RTT_BAD
 
 
-# ============================================================
-# Speed颜色
-# ============================================================
-
-def speed_color(
+def speed_background(
     value: Any,
-    max_speed: float,
 ) -> str:
 
-    try:
+    number = numeric_value(
+        value
+    )
 
-        value = float(value)
+    if number is None:
+        return BACKGROUND
 
-    except (
-        TypeError,
-        ValueError,
-    ):
-
+    if number < 1024 * 1024:
         return SPEED_LOW
 
-    if value <= 0:
-        return SPEED_LOW
-
-    if max_speed <= 0:
-        return SPEED_LOW
-
-    ratio = value / max_speed
-
-    if ratio >= 0.8:
-        return SPEED_HIGH
-
-    if ratio >= 0.4:
+    if number < 10 * 1024 * 1024:
         return SPEED_MEDIUM
 
-    return SPEED_LOW
+    return SPEED_HIGH
 
 
 # ============================================================
@@ -333,44 +427,41 @@ class ResultRenderer:
 
     def __init__(
         self,
-        table: TableResult,
-        title: str = "MiaoSpeed 节点测速",
-        result_dir: str | Path = RESULT_DIR,
-        report_id: str | None = None,
+        output_dir: str | Path = RESULT_DIR,
     ):
 
-        self.table = table
-
-        self.title = title
-
-        self.result_dir = Path(
-            result_dir
+        self.output_dir = Path(
+            output_dir
         )
 
-        self.result_dir.mkdir(
+        self.output_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-        # 同一次报告 PNG / JSON 使用同一个 ID
+        # 输出文件名：日期命名
         self.report_id = (
-            report_id
-            or datetime.now().strftime(
+            datetime.now().strftime(
                 "%Y-%m-%d_%H-%M-%S"
             )
         )
 
-        self.font = load_font(
-            FONT_SIZE
-        )
+    # ========================================================
+    # 列宽
+    # ========================================================
 
-        self.small_font = load_font(
-            SMALL_FONT_SIZE
-        )
+    def get_column_widths(
+        self,
+        columns: list[str],
+    ) -> list[int]:
 
-        self.title_font = load_font(
-            TITLE_FONT_SIZE
-        )
+        return [
+            COLUMN_WIDTHS.get(
+                column,
+                160,
+            )
+            for column in columns
+        ]
 
     # ========================================================
     # 统计
@@ -378,15 +469,17 @@ class ResultRenderer:
 
     def get_statistics(
         self,
+        table: TableResult,
     ) -> dict[str, Any]:
 
-        results = self.table.results
-
-        total = len(results)
+        total = len(
+            table.results
+        )
 
         available = sum(
             1
-            for result in results
+            for result
+            in table.results
             if result.available
         )
 
@@ -396,210 +489,103 @@ class ResultRenderer:
         )
 
         rtts = []
-
-        average_speeds = []
-
+        avg_speeds = []
         max_speeds = []
 
-        traffic_bytes = 0.0
+        for result in table.results:
 
-        for result in results:
-
-            # ----------------------
-            # RTT
-            # ----------------------
-
-            rtt = result.values.get(
+            cell = result.values.get(
                 "RTT"
             )
 
-            if rtt is not None:
+            if cell is not None:
 
-                try:
+                number = numeric_value(
+                    get_value(cell)
+                )
 
-                    value = float(
-                        rtt.raw
+                if number is not None:
+                    rtts.append(
+                        number
                     )
 
-                    if value > 0:
-
-                        rtts.append(
-                            value
-                        )
-
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-
-                    pass
-
-            # ----------------------
-            # Average Speed
-            # ----------------------
-
-            average = result.values.get(
+            cell = result.values.get(
                 "平均速度"
             )
 
-            if average is not None:
+            if cell is not None:
 
-                try:
+                number = numeric_value(
+                    get_value(cell)
+                )
 
-                    average_speeds.append(
-                        float(
-                            average.raw
-                        )
+                if number is not None:
+                    avg_speeds.append(
+                        number
                     )
 
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-
-                    pass
-
-            # ----------------------
-            # Max Speed
-            # ----------------------
-
-            maximum = result.values.get(
+            cell = result.values.get(
                 "最大速度"
             )
 
-            if maximum is not None:
+            if cell is not None:
 
-                try:
-
-                    max_speeds.append(
-                        float(
-                            maximum.raw
-                        )
-                    )
-
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-
-                    pass
-
-            # ----------------------
-            # Traffic
-            # ----------------------
-
-            per_second = result.values.get(
-                "每秒速度"
-            )
-
-            if per_second is not None:
-
-                values = per_second.raw
-
-                if isinstance(
-                    values,
-                    list,
-                ):
-
-                    for value in values:
-
-                        try:
-
-                            traffic_bytes += float(
-                                value
-                            )
-
-                        except (
-                            TypeError,
-                            ValueError,
-                        ):
-
-                            pass
-
-        return {
-            "total":
-                total,
-
-            "available":
-                available,
-
-            "failed":
-                failed,
-
-            "rtt_average": (
-                sum(rtts) / len(rtts)
-                if rtts
-                else None
-            ),
-
-            "rtt_min": (
-                min(rtts)
-                if rtts
-                else None
-            ),
-
-            "rtt_max": (
-                max(rtts)
-                if rtts
-                else None
-            ),
-
-            "speed_average": (
-                sum(average_speeds)
-                / len(average_speeds)
-                if average_speeds
-                else None
-            ),
-
-            "speed_max": (
-                max(max_speeds)
-                if max_speeds
-                else None
-            ),
-
-            "traffic_bytes":
-                traffic_bytes,
-
-            "traffic_mb":
-                traffic_bytes
-                / 1024
-                / 1024,
-        }
-
-    # ========================================================
-    # 列宽
-    # ========================================================
-
-    def get_column_widths(
-        self,
-        draw,
-    ) -> list[int]:
-
-        widths = []
-
-        for column in self.table.columns:
-
-            # 配置中存在的列
-            if column in COLUMN_WIDTHS:
-
-                widths.append(
-                    COLUMN_WIDTHS[column]
+                number = numeric_value(
+                    get_value(cell)
                 )
 
-                continue
+                if number is not None:
+                    max_speeds.append(
+                        number
+                    )
 
-            # 动态 Script 测试项
-            #
-            # Youtube
-            # OpenAI
-            # Claude
-            # Gemini
-            #
-            widths.append(
-                160
+        statistics = {
+            "total": total,
+            "available": available,
+            "failed": failed,
+        }
+
+        if rtts:
+
+            statistics["avg_rtt"] = (
+                sum(rtts)
+                / len(rtts)
             )
 
-        return widths
+            statistics["min_rtt"] = min(
+                rtts
+            )
+
+            statistics["max_rtt"] = max(
+                rtts
+            )
+
+        if avg_speeds:
+
+            statistics["avg_speed"] = (
+                sum(avg_speeds)
+                / len(avg_speeds)
+            )
+
+        if max_speeds:
+
+            statistics["max_speed"] = max(
+                max_speeds
+            )
+
+        # 保留 ResultCleaner 的统计
+        if table.statistics:
+
+            for key, value in (
+                table.statistics.items()
+            ):
+
+                statistics.setdefault(
+                    key,
+                    value,
+                )
+
+        return statistics
 
     # ========================================================
     # 标题
@@ -607,435 +593,760 @@ class ResultRenderer:
 
     def draw_title(
         self,
-        draw,
-    ) -> int:
+        draw: ImageDraw.ImageDraw,
+        width: int,
+        statistics: dict[str, Any],
+    ):
+
+        draw.rectangle(
+            (
+                0,
+                0,
+                width,
+                TITLE_HEIGHT,
+            ),
+            fill=BACKGROUND,
+        )
 
         draw.text(
             (
                 PADDING_X,
-                16,
+                18,
             ),
-            self.title,
-            font=self.title_font,
+            "MiaoSpeed 节点测速",
+            font=TITLE_FONT,
             fill=TEXT_COLOR,
         )
 
-        statistics = (
-            self.table.statistics
-            or self.get_statistics()
+        total = statistics.get(
+            "total",
+            0,
+        )
+
+        available = statistics.get(
+            "available",
+            0,
+        )
+
+        failed = statistics.get(
+            "failed",
+            0,
         )
 
         summary = (
-            f"节点 {statistics.get('total', 0)}"
-            f"   "
-            f"成功 {statistics.get('available', 0)}"
-            f"   "
-            f"失败 {statistics.get('failed', 0)}"
+            f"节点 {total}    "
+            f"成功 {available}    "
+            f"失败 {failed}"
+        )
+
+        bbox = draw.textbbox(
+            (0, 0),
+            summary,
+            font=SMALL_FONT,
+        )
+
+        summary_width = (
+            bbox[2] - bbox[0]
         )
 
         draw.text(
             (
-                430,
-                25,
+                max(
+                    PADDING_X,
+                    width
+                    - summary_width
+                    - PADDING_X,
+                ),
+                28,
             ),
             summary,
-            font=self.small_font,
+            font=SMALL_FONT,
             fill=SECONDARY_TEXT_COLOR,
         )
 
-        return TITLE_HEIGHT
-
     # ========================================================
-    # Header
+    # 表头
     # ========================================================
 
     def draw_header(
         self,
-        draw,
-        y: int,
+        draw: ImageDraw.ImageDraw,
+        columns: list[str],
         widths: list[int],
+        y: int,
     ):
 
         x = 0
 
-        for index, column in enumerate(
-            self.table.columns
+        for column, width in zip(
+            columns,
+            widths,
         ):
 
-            width = widths[index]
+            x2 = (
+                x + width
+            )
 
             draw.rectangle(
                 (
                     x,
                     y,
-                    x + width,
+                    x2,
                     y + HEADER_HEIGHT,
                 ),
                 fill=HEADER_BACKGROUND,
                 outline=BORDER_COLOR,
+                width=1,
             )
 
-            text = str(
-                column
-            )
-
-            bbox = draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
-                text,
-                font=self.font,
-            )
-
-            tw = (
-                bbox[2]
-                - bbox[0]
-            )
-
-            th = (
-                bbox[3]
-                - bbox[1]
-            )
-
-            draw.text(
-                (
-                    x
-                    + (
-                        width
-                        - tw
-                    )
-                    / 2,
-
-                    y
-                    + (
-                        HEADER_HEIGHT
-                        - th
-                    )
-                    / 2,
-                ),
-                text,
-                font=self.font,
-                fill=TEXT_COLOR,
-            )
-
-            x += width
-
-    # ========================================================
-    # 每秒速度
-    #
-    # 核心：
-    #
-    # 整个“每秒速度”列固定 500 px
-    #
-    # 有 8 个秒：
-    #
-    # 500 / 8 = 62.5px
-    #
-    # 每个格子完全相同。
-    # ========================================================
-
-    def draw_speed_blocks(
-        self,
-        draw,
-        x: int,
-        y: int,
-        width: int,
-        height: int,
-        speeds: list[Any],
-    ):
-
-        if not speeds:
-
-            draw.rectangle(
+            centered_text(
+                draw,
                 (
                     x,
                     y,
-                    x + width,
-                    y + height,
+                    x2,
+                    y + HEADER_HEIGHT,
                 ),
-                fill=BACKGROUND,
-                outline=BORDER_COLOR,
+                column,
+                font=SMALL_FONT,
+            )
+
+            x = x2
+
+    # ========================================================
+    # 普通单元格
+    # ========================================================
+
+    def draw_normal_cell(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box: tuple[int, int, int, int],
+        value: Any,
+        *,
+        background: str = BACKGROUND,
+        font=None,
+        fill=TEXT_COLOR,
+    ):
+
+        x1, y1, x2, y2 = box
+
+        draw.rectangle(
+            box,
+            fill=background,
+            outline=BORDER_COLOR,
+            width=1,
+        )
+
+        if font is None:
+            font = SMALL_FONT
+
+        text = fit_text(
+            draw,
+            safe_str(value),
+            max_width=max(
+                10,
+                x2 - x1 - 16,
+            ),
+            font=font,
+        )
+
+        centered_text(
+            draw,
+            box,
+            text,
+            font=font,
+            fill=fill,
+        )
+
+    # ========================================================
+    # RTT 单元格
+    # ========================================================
+
+    def draw_rtt_cell(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box: tuple[int, int, int, int],
+        value: Any,
+    ):
+
+        draw.rectangle(
+            box,
+            fill=rtt_background(
+                value
+            ),
+            outline=BORDER_COLOR,
+            width=1,
+        )
+
+        centered_text(
+            draw,
+            box,
+            safe_str(value),
+            font=SMALL_FONT,
+        )
+
+    # ========================================================
+    # 提取每秒速度
+    # ========================================================
+
+    def extract_speed_values(
+        self,
+        result: TestResult,
+    ) -> list[float]:
+
+        cell = result.values.get(
+            "每秒速度"
+        )
+
+        if cell is None:
+            cell = result.values.get(
+                "SPEED_PER_SECOND"
+            )
+
+        if cell is None:
+            return []
+
+        raw = get_value(
+            cell
+        )
+
+        if raw is None:
+            return []
+
+        if isinstance(
+            raw,
+            dict,
+        ):
+
+            raw = (
+                raw.get("Speeds")
+                or raw.get("speeds")
+                or raw.get("Speed")
+                or raw.get("speed")
+                or []
+            )
+
+        if not isinstance(
+            raw,
+            (list, tuple),
+        ):
+            return []
+
+        values = []
+
+        for item in raw:
+
+            number = numeric_value(
+                item
+            )
+
+            if number is not None:
+                values.append(
+                    number
+                )
+
+        return values
+
+    # ========================================================
+    # 每秒速度折线图
+    # ========================================================
+
+    def draw_speed_chart(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box: tuple[int, int, int, int],
+        result: TestResult,
+    ):
+
+        x1, y1, x2, y2 = box
+
+        draw.rectangle(
+            box,
+            fill=BACKGROUND,
+            outline=BORDER_COLOR,
+            width=1,
+        )
+
+        values = (
+            self.extract_speed_values(
+                result
+            )
+        )
+
+        if not values:
+
+            centered_text(
+                draw,
+                box,
+                "-",
+                font=SMALL_FONT,
+                fill=SECONDARY_TEXT_COLOR,
             )
 
             return
 
-        # -------------------------
-        # 转换数字
-        # -------------------------
+        # ====================================================
+        # 图表区域
+        # ====================================================
 
-        numeric_speeds = []
+        chart_left = (
+            x1
+            + CHART_PADDING_LEFT
+        )
 
-        for value in speeds:
+        chart_right = (
+            x2
+            - CHART_PADDING_RIGHT
+        )
 
-            try:
+        chart_top = (
+            y1
+            + CHART_PADDING_TOP
+        )
 
-                numeric_speeds.append(
-                    float(value)
-                )
+        chart_bottom = (
+            y2
+            - CHART_PADDING_BOTTOM
+        )
 
-            except (
-                TypeError,
-                ValueError,
-            ):
+        chart_width = (
+            chart_right
+            - chart_left
+        )
 
-                numeric_speeds.append(
-                    0.0
-                )
+        chart_height = (
+            chart_bottom
+            - chart_top
+        )
+
+        if (
+            chart_width <= 10
+            or chart_height <= 10
+        ):
+            return
+
+        # ====================================================
+        # 数据范围
+        # ====================================================
+
+        data_min = min(
+            values
+        )
+
+        data_max = max(
+            values
+        )
+
+        if abs(
+            data_max
+            - data_min
+        ) < 1e-9:
+
+            margin = max(
+                data_max * 0.05,
+                1,
+            )
+
+            data_min -= margin
+            data_max += margin
+
+        data_range = (
+            data_max
+            - data_min
+        )
+
+        data_min -= (
+            data_range * 0.08
+        )
+
+        data_max += (
+            data_range * 0.08
+        )
+
+        # ====================================================
+        # 网格
+        # ====================================================
+
+        middle_y = (
+            chart_top
+            + chart_height / 2
+        )
+
+        draw.line(
+            (
+                chart_left,
+                middle_y,
+                chart_right,
+                middle_y,
+            ),
+            fill=CHART_GRID_COLOR,
+            width=1,
+        )
+
+        draw.line(
+            (
+                chart_left,
+                chart_bottom,
+                chart_right,
+                chart_bottom,
+            ),
+            fill=CHART_GRID_COLOR,
+            width=1,
+        )
+
+        # ====================================================
+        # 平均速度线
+        # ====================================================
+
+        average = (
+            sum(values)
+            / len(values)
+        )
+
+        average_ratio = (
+            (average - data_min)
+            / (data_max - data_min)
+        )
+
+        average_ratio = max(
+            0.0,
+            min(
+                1.0,
+                average_ratio,
+            ),
+        )
+
+        average_y = (
+            chart_bottom
+            - average_ratio
+            * chart_height
+        )
+
+        dash = 4
+        gap = 4
+        current_x = chart_left
+
+        while current_x < chart_right:
+
+            end_x = min(
+                current_x + dash,
+                chart_right,
+            )
+
+            draw.line(
+                (
+                    current_x,
+                    average_y,
+                    end_x,
+                    average_y,
+                ),
+                fill=CHART_AVG_COLOR,
+                width=1,
+            )
+
+            current_x += (
+                dash + gap
+            )
+
+        # ====================================================
+        # 最大值线
+        # ====================================================
+
+        actual_max = max(
+            values
+        )
+
+        max_ratio = (
+            (actual_max - data_min)
+            / (data_max - data_min)
+        )
+
+        max_ratio = max(
+            0.0,
+            min(
+                1.0,
+                max_ratio,
+            ),
+        )
+
+        max_y = (
+            chart_bottom
+            - max_ratio
+            * chart_height
+        )
+
+        draw.line(
+            (
+                chart_left,
+                max_y,
+                chart_right,
+                max_y,
+            ),
+            fill=CHART_MAX_COLOR,
+            width=1,
+        )
+
+        # ====================================================
+        # 折线点
+        # ====================================================
+
+        points = []
 
         count = len(
-            numeric_speeds
+            values
         )
 
-        # -------------------------
-        # 所有速度格子统一宽度
-        # -------------------------
+        if count == 1:
 
-        block_width = (
-            width / count
-        )
-
-        max_speed = max(
-            numeric_speeds,
-            default=0,
-        )
-
-        for index, speed in enumerate(
-            numeric_speeds
-        ):
-
-            start_x = round(
-                x
-                + index
-                * block_width
+            px = (
+                chart_left
+                + chart_width / 2
             )
 
-            end_x = round(
-                x
-                + (index + 1)
-                * block_width
+            ratio = (
+                (values[0] - data_min)
+                / (data_max - data_min)
             )
 
-            actual_width = (
-                end_x
-                - start_x
-            )
-
-            color = speed_color(
-                speed,
-                max_speed,
-            )
-
-            # ---------------------
-            # 小格
-            # ---------------------
-
-            draw.rectangle(
-                (
-                    start_x,
-                    y,
-                    end_x,
-                    y + height,
+            ratio = max(
+                0.0,
+                min(
+                    1.0,
+                    ratio,
                 ),
-                fill=color,
-                outline=BORDER_COLOR,
             )
 
-            # ---------------------
-            # 文本
-            # ---------------------
-
-            text = (
-                format_speed_text(
-                    speed
-                )
+            py = (
+                chart_bottom
+                - ratio
+                * chart_height
             )
 
-            # 当前格子自动选择字体大小
-            font = self.small_font
+            points.append(
+                (px, py)
+            )
 
-            for font_size in range(
-                SMALL_FONT_SIZE,
-                MIN_SPEED_FONT_SIZE - 1,
-                -1,
+        else:
+
+            for index, value in enumerate(
+                values
             ):
 
-                candidate = load_font(
-                    font_size
+                px = (
+                    chart_left
+                    + (
+                        index
+                        / (count - 1)
+                    )
+                    * chart_width
                 )
 
-                bbox = draw.textbbox(
-                    (
-                        0,
-                        0,
+                ratio = (
+                    (value - data_min)
+                    / (data_max - data_min)
+                )
+
+                ratio = max(
+                    0.0,
+                    min(
+                        1.0,
+                        ratio,
                     ),
-                    text,
-                    font=candidate,
                 )
 
-                text_width_value = (
-                    bbox[2]
-                    - bbox[0]
+                py = (
+                    chart_bottom
+                    - ratio
+                    * chart_height
                 )
 
-                if (
-                    text_width_value
-                    <= actual_width - 6
-                ):
+                points.append(
+                    (px, py)
+                )
 
-                    font = candidate
+        # ====================================================
+        # 折线
+        # ====================================================
 
-                    break
+        if len(points) >= 2:
 
-            bbox = draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
-                text,
-                font=font,
+            draw.line(
+                points,
+                fill=CHART_LINE_COLOR,
+                width=2,
+                joint="curve",
             )
 
-            tw = (
+        # ====================================================
+        # 数据点
+        # ====================================================
+
+        radius = 2
+
+        for px, py in points:
+
+            draw.ellipse(
+                (
+                    px - radius,
+                    py - radius,
+                    px + radius,
+                    py + radius,
+                ),
+                fill=CHART_POINT_COLOR,
+                outline=BACKGROUND,
+                width=1,
+            )
+
+        # ====================================================
+        # 平均速度文字
+        # ====================================================
+
+        label_font = load_font(9)
+
+        draw.text(
+            (
+                x1 + 5,
+                y1 + 2,
+            ),
+            human_size(
+                average
+            ),
+            font=label_font,
+            fill=SECONDARY_TEXT_COLOR,
+        )
+
+        # ====================================================
+        # 时间轴
+        # ====================================================
+
+        draw.text(
+            (
+                chart_left - 4,
+                chart_bottom + 1,
+            ),
+            "1",
+            font=label_font,
+            fill=SECONDARY_TEXT_COLOR,
+        )
+
+        if count > 1:
+
+            last_text = str(
+                count
+            )
+
+            bbox = draw.textbbox(
+                (0, 0),
+                last_text,
+                font=label_font,
+            )
+
+            text_width = (
                 bbox[2]
                 - bbox[0]
             )
 
-            th = (
-                bbox[3]
-                - bbox[1]
-            )
-
-            # 居中
-            tx = (
-                start_x
-                + (
-                    actual_width
-                    - tw
-                )
-                / 2
-            )
-
-            ty = (
-                y
-                + (
-                    height
-                    - th
-                )
-                / 2
-            )
-
             draw.text(
                 (
-                    tx,
-                    ty,
+                    chart_right
+                    - text_width,
+                    chart_bottom + 1,
                 ),
-                text,
-                font=font,
-                fill=TEXT_COLOR,
+                last_text,
+                font=label_font,
+                fill=SECONDARY_TEXT_COLOR,
             )
 
     # ========================================================
-    # 普通行
+    # 行
     # ========================================================
 
     def draw_row(
         self,
-        draw,
-        y: int,
-        widths: list[int],
-        row: dict[str, Any],
+        draw: ImageDraw.ImageDraw,
         result: TestResult,
+        columns: list[str],
+        widths: list[int],
+        y: int,
     ):
 
         x = 0
 
-        statistics = (
-            self.table.statistics
-            or self.get_statistics()
-        )
-
-        global_max_speed = (
-            statistics.get(
-                "speed_max"
-            )
-            or 0
-        )
-
-        for index, column in enumerate(
-            self.table.columns
+        for column, width in zip(
+            columns,
+            widths,
         ):
 
-            width = widths[index]
+            x2 = (
+                x + width
+            )
 
-            # =================================================
+            box = (
+                x,
+                y,
+                x2,
+                y + ROW_HEIGHT,
+            )
+
+            # ------------------------------------------------
+            # 序号
+            # ------------------------------------------------
+
+            if column == "序号":
+
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    result.node.index,
+                    font=SMALL_FONT,
+                )
+
+            # ------------------------------------------------
+            # 节点名称
+            # ------------------------------------------------
+
+            elif column == "节点名称":
+
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    result.node.name,
+                    font=SMALL_FONT,
+                )
+
+            # ------------------------------------------------
+            # 类型
+            # ------------------------------------------------
+
+            elif column == "类型":
+
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    result.node.type,
+                    font=SMALL_FONT,
+                )
+
+            # ------------------------------------------------
             # 每秒速度
-            # =================================================
+            # ------------------------------------------------
 
-            if column == "每秒速度":
+            elif column == "每秒速度":
 
-                cell = result.values.get(
-                    "每秒速度"
+                self.draw_speed_chart(
+                    draw,
+                    box,
+                    result,
                 )
 
-                speeds = (
-                    cell.raw
-                    if cell is not None
-                    else []
-                )
-
-                if not isinstance(
-                    speeds,
-                    list,
-                ):
-
-                    speeds = []
-
-                self.draw_speed_blocks(
-                    draw=draw,
-
-                    x=x,
-
-                    y=y,
-
-                    width=width,
-
-                    height=ROW_HEIGHT,
-
-                    speeds=speeds,
-                )
-
-                x += width
-
-                continue
-
-            # =================================================
-            # 普通数据
-            # =================================================
-
-            value = row.get(
-                column,
-                "-",
-            )
-
-            value_text = (
-                value_to_text(
-                    value
-                )
-            )
-
-            background = (
-                BACKGROUND
-            )
-
-            # =================================================
+            # ------------------------------------------------
             # RTT
-            # =================================================
+            # ------------------------------------------------
 
-            if column in {
+            elif column in {
                 "RTT",
-                "MAX RTT",
                 "RTT标准差",
+                "MAX RTT",
                 "连接标准差",
                 "HTTPS延迟",
                 "HTTP(S)延迟",
@@ -1043,107 +1354,130 @@ class ResultRenderer:
                 "总RTT",
             }:
 
-                cell = result.values.get(
-                    column
-                )
-
-                background = (
-                    rtt_color(
-                        cell.raw
-                        if cell is not None
-                        else None
+                cell = (
+                    result.values.get(
+                        column
                     )
                 )
 
-            # =================================================
-            # SPEED
-            # =================================================
+                if cell is None:
+                    value = "-"
+                else:
+                    value = get_display_value(
+                        cell
+                    )
 
-            elif column in {
-                "平均速度",
-                "最大速度",
-            }:
-
-                cell = result.values.get(
-                    column
+                self.draw_rtt_cell(
+                    draw,
+                    box,
+                    value,
                 )
 
-                background = (
-                    speed_color(
-                        cell.raw
-                        if cell is not None
-                        else None,
-                        global_max_speed,
+            # ------------------------------------------------
+            # 平均速度
+            # ------------------------------------------------
+
+            elif column == "平均速度":
+
+                cell = (
+                    result.values.get(
+                        column
                     )
                 )
 
-            # =================================================
-            # 绘制格子
-            # =================================================
+                if cell is None:
 
-            draw.rectangle(
-                (
-                    x,
-                    y,
-                    x + width,
-                    y + ROW_HEIGHT,
-                ),
-                fill=background,
-                outline=BORDER_COLOR,
-            )
+                    display = "-"
+                    raw = None
 
-            # =================================================
-            # 文字
-            # =================================================
+                else:
 
-            bbox = draw.textbbox(
-                (
-                    0,
-                    0,
-                ),
-                value_text,
-                font=self.font,
-            )
+                    display = (
+                        get_display_value(
+                            cell
+                        )
+                    )
 
-            tw = (
-                bbox[2]
-                - bbox[0]
-            )
+                    raw = get_value(
+                        cell
+                    )
 
-            th = (
-                bbox[3]
-                - bbox[1]
-            )
-
-            tx = (
-                x
-                + (
-                    width
-                    - tw
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    display,
+                    background=speed_background(
+                        raw
+                    ),
+                    font=SMALL_FONT,
                 )
-                / 2
-            )
 
-            ty = (
-                y
-                + (
-                    ROW_HEIGHT
-                    - th
+            # ------------------------------------------------
+            # 最大速度
+            # ------------------------------------------------
+
+            elif column == "最大速度":
+
+                cell = (
+                    result.values.get(
+                        column
+                    )
                 )
-                / 2
-            )
 
-            draw.text(
-                (
-                    tx,
-                    ty,
-                ),
-                value_text,
-                font=self.font,
-                fill=TEXT_COLOR,
-            )
+                if cell is None:
 
-            x += width
+                    display = "-"
+                    raw = None
+
+                else:
+
+                    display = (
+                        get_display_value(
+                            cell
+                        )
+                    )
+
+                    raw = get_value(
+                        cell
+                    )
+
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    display,
+                    background=speed_background(
+                        raw
+                    ),
+                    font=SMALL_FONT,
+                )
+
+            # ------------------------------------------------
+            # 其他
+            # ------------------------------------------------
+
+            else:
+
+                cell = (
+                    result.values.get(
+                        column
+                    )
+                )
+
+                if cell is None:
+                    value = "-"
+                else:
+                    value = get_display_value(
+                        cell
+                    )
+
+                self.draw_normal_cell(
+                    draw,
+                    box,
+                    value,
+                    font=SMALL_FONT,
+                )
+
+            x = x2
 
     # ========================================================
     # Footer
@@ -1151,131 +1485,138 @@ class ResultRenderer:
 
     def draw_footer(
         self,
-        draw,
-        y: int,
+        draw: ImageDraw.ImageDraw,
+        width: int,
+        height: int,
+        statistics: dict[str, Any],
     ):
 
-        statistics = (
-            self.table.statistics
-            or self.get_statistics()
+        y = (
+            height
+            - FOOTER_HEIGHT
         )
 
-        rtt_average = (
-            statistics.get(
-                "rtt_average"
-            )
-        )
-
-        speed_average = (
-            statistics.get(
-                "speed_average"
-            )
-        )
-
-        traffic_mb = (
-            statistics.get(
-                "traffic_mb",
+        draw.line(
+            (
                 0,
-            )
+                y,
+                width,
+                y,
+            ),
+            fill=BORDER_COLOR,
+            width=1,
         )
 
-        if rtt_average is None:
+        parts = []
 
-            rtt_text = "-"
-
-        else:
-
-            rtt_text = (
-                f"{rtt_average:.1f}ms"
-            )
-
-        speed_text = (
-            format_speed_text(
-                speed_average
-            )
-            if speed_average is not None
-            else "-"
+        total = statistics.get(
+            "total"
         )
 
-        text = (
-            f"平均 RTT: {rtt_text}"
-            f"    "
-            f"平均速度: {speed_text}"
-            f"    "
-            f"测试流量: {traffic_mb:.2f}MB"
+        if total is not None:
+            parts.append(
+                f"节点: {total}"
+            )
+
+        available = statistics.get(
+            "available"
+        )
+
+        if available is not None:
+            parts.append(
+                f"成功: {available}"
+            )
+
+        failed = statistics.get(
+            "failed"
+        )
+
+        if failed is not None:
+            parts.append(
+                f"失败: {failed}"
+            )
+
+        avg_rtt = statistics.get(
+            "avg_rtt"
+        )
+
+        if avg_rtt is not None:
+            parts.append(
+                f"平均 RTT: {avg_rtt:.0f}ms"
+            )
+
+        avg_speed = statistics.get(
+            "avg_speed"
+        )
+
+        if avg_speed is not None:
+            parts.append(
+                "平均速度: "
+                f"{human_size(avg_speed)}/s"
+            )
+
+        footer_text = "    ".join(
+            parts
         )
 
         draw.text(
             (
                 PADDING_X,
-                y + 18,
+                y + 25,
             ),
-            text,
-            font=self.small_font,
+            footer_text,
+            font=SMALL_FONT,
             fill=SECONDARY_TEXT_COLOR,
         )
 
     # ========================================================
-    # Render PNG
+    # Render
     # ========================================================
 
     def render(
         self,
-        filename: str | None = None,
+        table: TableResult,
     ) -> Path:
 
-        # -------------------------
-        # 临时 Canvas
-        # -------------------------
+        columns = table.columns
 
-        temp = Image.new(
-            "RGB",
-            (
-                1,
-                1,
-            ),
-            BACKGROUND,
-        )
+        if not columns:
 
-        temp_draw = ImageDraw.Draw(
-            temp
-        )
-
-        # -------------------------
-        # 计算固定列宽
-        # -------------------------
+            columns = [
+                "序号",
+                "节点名称",
+                "类型",
+            ]
 
         widths = (
             self.get_column_widths(
-                temp_draw
+                columns
             )
         )
 
-        total_width = sum(
+        width = sum(
             widths
         )
 
-        total_height = (
-            TITLE_HEIGHT
-            + HEADER_HEIGHT
-            + (
-                len(
-                    self.table.rows
-                )
-                * ROW_HEIGHT
+        statistics = (
+            self.get_statistics(
+                table
             )
-            + FOOTER_HEIGHT
         )
 
-        # -------------------------
-        # 创建画布
-        # -------------------------
+        height = (
+            TITLE_HEIGHT
+            + HEADER_HEIGHT
+            + ROW_HEIGHT
+            * len(table.results)
+            + FOOTER_HEIGHT
+        )
 
         image = Image.new(
             "RGB",
             (
-                total_width,
-                total_height,
+                width,
+                height,
             ),
             BACKGROUND,
         )
@@ -1284,72 +1625,51 @@ class ResultRenderer:
             image
         )
 
-        # -------------------------
-        # Title
-        # -------------------------
-
-        y = self.draw_title(
-            draw
+        # 标题
+        self.draw_title(
+            draw,
+            width,
+            statistics,
         )
 
-        # -------------------------
-        # Header
-        # -------------------------
-
+        # 表头
         self.draw_header(
             draw,
-            y,
+            columns,
             widths,
+            TITLE_HEIGHT,
         )
 
-        y += HEADER_HEIGHT
+        # 数据行
+        y = (
+            TITLE_HEIGHT
+            + HEADER_HEIGHT
+        )
 
-        # -------------------------
-        # Rows
-        # -------------------------
-
-        for index, row in enumerate(
-            self.table.rows
-        ):
-
-            if index >= len(
-                self.table.results
-            ):
-                break
+        for result in table.results:
 
             self.draw_row(
-                draw=draw,
-                y=y,
-                widths=widths,
-                row=row,
-                result=self.table.results[
-                    index
-                ],
+                draw,
+                result,
+                columns,
+                widths,
+                y,
             )
 
             y += ROW_HEIGHT
 
-        # -------------------------
         # Footer
-        # -------------------------
-
         self.draw_footer(
             draw,
-            y,
+            width,
+            height,
+            statistics,
         )
 
-        # -------------------------
-        # 保存
-        # -------------------------
-
-        filename = (
-            filename
-            or f"{self.report_id}.png"
-        )
-
+        # PNG
         output_path = (
-            self.result_dir
-            / filename
+            self.output_dir
+            / f"{self.report_id}.png"
         )
 
         image.save(
@@ -1360,41 +1680,75 @@ class ResultRenderer:
         return output_path
 
     # ========================================================
-    # Save JSON
+    # JSON
     # ========================================================
 
     def save_json(
         self,
-        filename: str | None = None,
+        table: TableResult,
     ) -> Path:
 
-        filename = (
-            filename
-            or f"{self.report_id}.json"
-        )
-
-        output_path = (
-            self.result_dir
-            / filename
-        )
-
-        statistics = (
-            self.table.statistics
-            or self.get_statistics()
-        )
-
         data = {
-            "columns":
-                self.table.columns,
-
-            "rows":
-                self.table.rows,
-
-            "statistics":
-                statistics,
+            "columns": table.columns,
+            "rows": table.rows,
+            "statistics": table.statistics,
+            "results": [],
         }
 
-        import json
+        for result in table.results:
+
+            result_data = {
+                "index":
+                    result.node.index,
+
+                "name":
+                    result.node.name,
+
+                "type":
+                    result.node.type,
+
+                "server":
+                    result.node.server,
+
+                "port":
+                    result.node.port,
+
+                "available":
+                    result.available,
+
+                "error":
+                    result.error,
+
+                "invoke_duration":
+                    result.invoke_duration,
+
+                "values": {},
+            }
+
+            for key, cell in (
+                result.values.items()
+            ):
+
+                result_data[
+                    "values"
+                ][key] = {
+                    "raw":
+                        get_value(cell),
+
+                    "display":
+                        get_display_value(cell),
+                }
+
+            data[
+                "results"
+            ].append(
+                result_data
+            )
+
+        output_path = (
+            self.output_dir
+            / f"{self.report_id}.json"
+        )
 
         with output_path.open(
             "w",
@@ -1406,6 +1760,7 @@ class ResultRenderer:
                 f,
                 ensure_ascii=False,
                 indent=2,
+                default=str,
             )
 
         return output_path
