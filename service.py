@@ -286,20 +286,14 @@ class SpeedTestService:
                     # ----------------------
                     # PNG + JSON
                     # ----------------------
-                    renderer = ResultRenderer(
-                        table=table,
+                    renderer = ResultRenderer()
 
-                        title=(
-                            "MiaoSpeed 节点测速"
-                        ),
+                    image_path = renderer.render(
+                        table,
                     )
 
-                    image_path = (
-                        renderer.render()
-                    )
-
-                    json_path = (
-                        renderer.save_json()
+                    json_path = renderer.save_json(
+                        table,
                     )
 
                     # ----------------------
