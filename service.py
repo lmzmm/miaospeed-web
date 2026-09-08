@@ -1,7 +1,8 @@
-import asyncio
+from __future__ import annotations
+
 import json
 
-from clash import load_clash_proxies
+from clash import load_clash_proxies_source
 from miaospeed_client import MiaoSpeedClient
 from models import (
     TestItem,
@@ -40,6 +41,7 @@ class SpeedTestService:
         items: list[TestItem],
         sort_by: str = "订阅原序",
         reverse: bool = False,
+        proxy: str | None = None,
     ):
 
         try:
@@ -49,11 +51,20 @@ class SpeedTestService:
                 "running",
             )
 
-            # -----------------------------
-            # 读取节点
-            # -----------------------------
-            nodes = load_clash_proxies(
-                file_path
+            # =================================================
+            # 加载节点
+            #
+            # file_path 可以是：
+            #
+            # 1. 本地 Clash/Mihomo YAML
+            # 2. http/https 订阅 URL
+            #
+            # proxy 只用于下载订阅。
+            # =================================================
+
+            nodes = await load_clash_proxies_source(
+                file_path,
+                proxy=proxy,
             )
 
             if not nodes:
@@ -72,9 +83,17 @@ class SpeedTestService:
                 f"有效节点: {len(nodes)}"
             )
 
-            # -----------------------------
-            # 按 MiaoSpeed Index 保存
-            # -----------------------------
+            if proxy:
+
+                print(
+                    f"[{task_id}] "
+                    f"订阅下载代理: {proxy}"
+                )
+
+            # =================================================
+            # 按 MiaoSpeed Index 保存结果
+            # =================================================
+
             results: list[
                 TestResult | None
             ] = [
@@ -82,6 +101,10 @@ class SpeedTestService:
             ] * len(nodes)
 
             task_error = None
+
+            # =================================================
+            # MiaoSpeed 消息处理
+            # =================================================
 
             async def on_message(
                 raw: str,
@@ -104,9 +127,10 @@ class SpeedTestService:
 
                     return False
 
-                # =========================
-                # 全局 Error
-                # =========================
+                # =================================================
+                # Global Error
+                # =================================================
+
                 error = data.get(
                     "Error"
                 )
@@ -125,9 +149,10 @@ class SpeedTestService:
 
                     return True
 
-                # =========================
+                # =================================================
                 # Progress
-                # =========================
+                # =================================================
+
                 progress = data.get(
                     "Progress"
                 )
@@ -147,6 +172,7 @@ class SpeedTestService:
                         index,
                         int,
                     ):
+
                         return False
 
                     if not (
@@ -154,12 +180,14 @@ class SpeedTestService:
                         <= index
                         < len(nodes)
                     ):
+
                         return False
 
                     if not isinstance(
                         record,
                         dict,
                     ):
+
                         return False
 
                     result = collect_record(
@@ -212,9 +240,10 @@ class SpeedTestService:
 
                     return False
 
-                # =========================
+                # =================================================
                 # Final Result
-                # =========================
+                # =================================================
+
                 final_result = data.get(
                     "Result"
                 )
@@ -235,12 +264,14 @@ class SpeedTestService:
                         if index >= len(
                             nodes
                         ):
+
                             break
 
                         if not isinstance(
                             record,
                             dict,
                         ):
+
                             continue
 
                         results[index] = (
@@ -263,9 +294,10 @@ class SpeedTestService:
                         if result is not None
                     ]
 
-                    # ----------------------
-                    # ResultCleaner
-                    # ----------------------
+                    # =================================================
+                    # 清洗
+                    # =================================================
+
                     cleaner = ResultCleaner(
                         final_results
                     )
@@ -275,30 +307,37 @@ class SpeedTestService:
                         reverse=reverse,
                     )
 
-                    # ----------------------
+                    # =================================================
                     # 保存最终结果
-                    # ----------------------
+                    # =================================================
+
                     await self.task_manager.set_results(
                         task_id,
                         table.results,
                     )
 
-                    # ----------------------
+                    # =================================================
                     # PNG + JSON
-                    # ----------------------
+                    # =================================================
+
                     renderer = ResultRenderer()
 
-                    image_path = renderer.render(
-                        table,
+                    image_path = (
+                        renderer.render(
+                            table
+                        )
                     )
 
-                    json_path = renderer.save_json(
-                        table,
+                    json_path = (
+                        renderer.save_json(
+                            table
+                        )
                     )
 
-                    # ----------------------
+                    # =================================================
                     # 完成消息
-                    # ----------------------
+                    # =================================================
+
                     await self.task_manager.publish(
                         task_id,
                         {
@@ -330,7 +369,13 @@ class SpeedTestService:
                             "statistics":
                                 table.statistics,
 
+                            # 对前端开放的图片地址
                             "image":
+                                f"/api/speedtest/"
+                                f"{task_id}/image",
+
+                            # 保留本地路径
+                            "image_path":
                                 str(
                                     image_path
                                 ),
@@ -351,18 +396,21 @@ class SpeedTestService:
 
                 return False
 
-            # -----------------------------
+            # =================================================
             # 执行 MiaoSpeed
-            # -----------------------------
+            # =================================================
+
             await self.client.run(
                 nodes=nodes,
                 items=items,
                 on_message=on_message,
             )
 
-            # -----------------------------
-            # 没有 Result
-            # -----------------------------
+            # =================================================
+            # MiaoSpeed 没有发送 Result 时
+            # 使用 Progress 中已经收集的结果
+            # =================================================
+
             if task_error:
                 return
 
@@ -397,20 +445,18 @@ class SpeedTestService:
                     table.results,
                 )
 
-                renderer = ResultRenderer(
-                    table=table,
-
-                    title=(
-                        "MiaoSpeed 节点测速"
-                    ),
-                )
+                renderer = ResultRenderer()
 
                 image_path = (
-                    renderer.render()
+                    renderer.render(
+                        table
+                    )
                 )
 
                 json_path = (
-                    renderer.save_json()
+                    renderer.save_json(
+                        table
+                    )
                 )
 
                 await self.task_manager.publish(
@@ -445,6 +491,10 @@ class SpeedTestService:
                             table.statistics,
 
                         "image":
+                            f"/api/speedtest/"
+                            f"{task_id}/image",
+
+                        "image_path":
                             str(
                                 image_path
                             ),

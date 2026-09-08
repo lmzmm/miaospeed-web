@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.speedtest import (
     create_router,
@@ -16,6 +17,22 @@ from task.manager import (
 app = FastAPI(
     title="MiaoSpeed SpeedTest",
     version="1.0.0",
+)
+
+
+# ============================================================
+# CORS
+#
+# 前端（如 http://localhost:3000）与后端不同源，
+# 浏览器会先发 OPTIONS 预检请求，必须配置 CORS 才能访问。
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -55,3 +72,19 @@ async def health():
         "status":
             "ok"
     }
+
+
+# ============================================================
+# 直接启动
+# ============================================================
+
+if __name__ == "__main__":
+
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+    )

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import (
     APIRouter,
@@ -8,35 +11,112 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from models import TestItem
+from renderer import RESULT_DIR
 from service import SpeedTestService
 from task.manager import (
     TaskManager,
+    serialize_result,
 )
 
 
-class SpeedTestRequest(BaseModel):
+# ============================================================
+# 排序映射
+# ============================================================
 
-    subscription: str
+SORT_MAPPING = {
+    "rtt": "RTT",
 
-    tests: list[dict[str, Any]] = (
-        Field(
-            default_factory=list
-        )
+    "http_delay": "HTTPS延迟",
+    "https_delay": "HTTPS延迟",
+
+    "max_speed": "最大速度",
+
+    "avg_speed": "平均速度",
+
+    "subscription_order": "订阅原序",
+}
+
+
+def normalize_sort_by(
+    value: str,
+) -> str:
+    """
+    API 对外使用英文参数，
+    内部继续使用 ResultCleaner 原来的中文列名。
+    """
+
+    value = (
+        str(value)
+        .strip()
+        .lower()
     )
 
-    sort_by: str = "订阅原序"
+    result = SORT_MAPPING.get(
+        value
+    )
 
+    if result is None:
+
+        raise ValueError(
+            "sort_by 必须是: "
+            "rtt、http_delay、"
+            "max_speed、avg_speed、"
+            "subscription_order"
+        )
+
+    return result
+
+
+# ============================================================
+# Request
+# ============================================================
+
+class SpeedTestRequest(BaseModel):
+
+    # Clash / Mihomo 订阅 URL
+    subscription: str
+
+    # 可选：
+    # 用于下载 subscription 的 HTTP/HTTPS 代理
+    proxy: str | None = None
+
+    # 测试项目
+    tests: list[
+        dict[str, Any]
+    ] = Field(
+        default_factory=list
+    )
+
+    # 排序字段
+    #
+    # rtt
+    # http_delay
+    # max_speed
+    # avg_speed
+    # subscription_order
+    #
+    sort_by: str = "avg_speed"
+
+    # false = 正序
+    # true  = 倒序
     reverse: bool = False
 
 
+# ============================================================
+# TestItem
+# ============================================================
+
 def parse_test_items(
-    raw_tests: list[dict[str, Any]],
+    raw_tests: list[
+        dict[str, Any]
+    ],
 ) -> list[TestItem]:
 
-    items = []
+    items: list[TestItem] = []
 
     for raw in raw_tests:
 
@@ -81,6 +161,73 @@ def parse_test_items(
     return items
 
 
+# ============================================================
+# URL 校验
+# ============================================================
+
+def validate_subscription_url(
+    value: str,
+):
+    parsed = urlparse(
+        value
+    )
+
+    if parsed.scheme not in {
+        "http",
+        "https",
+    }:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "subscription 必须是 "
+                "http 或 https URL"
+            ),
+        )
+
+    if not parsed.netloc:
+
+        raise HTTPException(
+            status_code=400,
+            detail="subscription URL 无效",
+        )
+
+
+def validate_proxy(
+    value: str | None,
+):
+    if not value:
+        return
+
+    parsed = urlparse(
+        value
+    )
+
+    if parsed.scheme not in {
+        "http",
+        "https",
+    }:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "proxy 目前仅支持 "
+                "http / https"
+            ),
+        )
+
+    if not parsed.netloc:
+
+        raise HTTPException(
+            status_code=400,
+            detail="proxy 地址无效",
+        )
+
+
+# ============================================================
+# Router
+# ============================================================
+
 def create_router(
     task_manager: TaskManager,
     service: SpeedTestService,
@@ -91,24 +238,51 @@ def create_router(
         tags=["speedtest"],
     )
 
+    # ========================================================
+    # 创建测速任务
+    # ========================================================
+
     @router.post("")
     async def create_speedtest(
         request: SpeedTestRequest,
     ):
 
-        file_path = Path(
+        # ----------------------------------------------------
+        # subscription URL
+        # ----------------------------------------------------
+
+        validate_subscription_url(
             request.subscription
         )
 
-        if not file_path.exists():
+        # ----------------------------------------------------
+        # proxy
+        # ----------------------------------------------------
+
+        validate_proxy(
+            request.proxy
+        )
+
+        # ----------------------------------------------------
+        # sort
+        # ----------------------------------------------------
+
+        try:
+
+            sort_by = normalize_sort_by(
+                request.sort_by
+            )
+
+        except ValueError as e:
 
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "订阅文件不存在: "
-                    f"{file_path}"
-                ),
-            )
+                detail=str(e),
+            ) from e
+
+        # ----------------------------------------------------
+        # tests
+        # ----------------------------------------------------
 
         items = parse_test_items(
             request.tests
@@ -121,23 +295,31 @@ def create_router(
                 detail="至少需要一个测试项",
             )
 
+        # ----------------------------------------------------
+        # 创建任务
+        # ----------------------------------------------------
+
         task = (
             await task_manager.create_task()
         )
+
+        # ----------------------------------------------------
+        # 后台测速
+        # ----------------------------------------------------
 
         asyncio.create_task(
             service.run_task(
                 task_id=task.task_id,
 
-                file_path=str(
-                    file_path
-                ),
+                file_path=request.subscription,
 
                 items=items,
 
-                sort_by=request.sort_by,
+                sort_by=sort_by,
 
                 reverse=request.reverse,
+
+                proxy=request.proxy,
             )
         )
 
@@ -147,7 +329,21 @@ def create_router(
 
             "status":
                 task.status,
+
+            "sort_by":
+                request.sort_by,
+
+            "reverse":
+                request.reverse,
+
+            "image":
+                f"/api/speedtest/"
+                f"{task.task_id}/image",
         }
+
+    # ========================================================
+    # 获取任务状态
+    # ========================================================
 
     @router.get(
         "/{task_id}"
@@ -169,10 +365,6 @@ def create_router(
                 detail="任务不存在",
             )
 
-        from task.manager import (
-            serialize_result,
-        )
-
         return {
             "task_id":
                 task.task_id,
@@ -189,6 +381,15 @@ def create_router(
             "error":
                 task.error,
 
+            "image":
+                (
+                    f"/api/speedtest/"
+                    f"{task_id}/image"
+                    if task.status
+                    == "completed"
+                    else None
+                ),
+
             "results": [
                 serialize_result(
                     result
@@ -196,6 +397,65 @@ def create_router(
                 for result in task.results
             ],
         }
+
+    # ========================================================
+    # 获取最终 PNG
+    # ========================================================
+
+    @router.get(
+        "/{task_id}/image"
+    )
+    async def get_result_image(
+        task_id: str,
+    ):
+
+        task = (
+            await task_manager.get_task(
+                task_id
+            )
+        )
+
+        if task is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="任务不存在",
+            )
+
+        if task.status != "completed":
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "测速尚未完成"
+                ),
+            )
+
+        image_path = (
+            Path(RESULT_DIR)
+            / f"{task_id}.png"
+        )
+
+        if not image_path.exists():
+
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "测速图片不存在"
+                ),
+            )
+
+        return FileResponse(
+            path=image_path,
+            media_type="image/png",
+            filename=(
+                f"{task_id}.png"
+            ),
+        )
+
+    # ========================================================
+    # WebSocket
+    # ========================================================
 
     @router.websocket(
         "/ws/{task_id}"
@@ -230,7 +490,10 @@ def create_router(
 
         try:
 
+            # ------------------------------------------------
             # 当前状态
+            # ------------------------------------------------
+
             await websocket.send_json(
                 {
                     "type":
@@ -250,10 +513,22 @@ def create_router(
 
                     "error":
                         task.error,
+
+                    "image":
+                        (
+                            f"/api/speedtest/"
+                            f"{task_id}/image"
+                            if task.status
+                            == "completed"
+                            else None
+                        ),
                 }
             )
 
-            # 任务已经结束
+            # ------------------------------------------------
+            # 已经结束
+            # ------------------------------------------------
+
             if task.status in {
                 "completed",
                 "failed",
@@ -262,9 +537,15 @@ def create_router(
 
                 return
 
+            # ------------------------------------------------
+            # 实时消息
+            # ------------------------------------------------
+
             while True:
 
-                message = await queue.get()
+                message = (
+                    await queue.get()
+                )
 
                 await websocket.send_json(
                     message
