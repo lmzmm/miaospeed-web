@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { SpeedTestForm } from "@/components/speed-test-form";
+import { SubscriptionInput } from "@/components/subscription-input";
+import { NodeSelector } from "@/components/node-selector";
+import { SortSelector } from "@/components/sort-selector";
+import { TestSelector } from "@/components/test-selector";
 import { SpeedTestProgress } from "@/components/speed-test-progress";
 import { SpeedTestResult } from "@/components/speed-test-result";
 import { StatusBadge } from "@/components/status-badge";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle, Gauge } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { AlertCircle, Gauge, Loader2, Play } from "lucide-react";
 
 import { useSpeedTestWebSocket } from "@/hooks/use-speed-test-websocket";
 import {
@@ -15,15 +22,23 @@ import {
   createSpeedTest,
   getSpeedTest,
   getSpeedTestImageUrl,
+  parseSubscription,
 } from "@/lib/api";
 
 import type {
-  SpeedTestRequest,
+  ParsedNode,
+  SortByValue,
   SpeedTestState,
   SpeedTestStatus,
   SpeedTestTask,
   SpeedTestWebSocketMessage,
 } from "@/types/speedtest";
+import {
+  DEFAULT_REVERSE,
+  DEFAULT_SELECTED_TEST_IDS,
+  DEFAULT_SORT_BY,
+  buildTestsFromIds,
+} from "@/lib/test-config";
 
 const STORAGE_KEY = "miaospeed.speedtest.task_id";
 
@@ -44,12 +59,29 @@ function isTerminal(status: string): boolean {
 }
 
 export default function Home() {
+  // ----------------------------------------------------------
+  // 配置状态
+  // ----------------------------------------------------------
+  const [subscription, setSubscription] = useState("");
+  const [proxy, setProxy] = useState("");
+  const [nodes, setNodes] = useState<ParsedNode[]>([]);
+  const [selectedNodeIndices, setSelectedNodeIndices] = useState<number[]>([]);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [selectedTestIds, setSelectedTestIds] = useState<string[]>(
+    DEFAULT_SELECTED_TEST_IDS,
+  );
+  const [sortBy, setSortBy] = useState<SortByValue>(DEFAULT_SORT_BY);
+  const [reverse, setReverse] = useState<boolean>(DEFAULT_REVERSE);
+
+  // ----------------------------------------------------------
+  // 任务状态
+  // ----------------------------------------------------------
   const [state, setState] = useState<SpeedTestState>(INITIAL_STATE);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [wsError, setWsError] = useState<string | null>(null);
   const [reconnectToken, setReconnectToken] = useState(0);
 
-  // 用 ref 保存最新状态，供异步回调读取
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
@@ -129,9 +161,6 @@ export default function Home() {
     }
   }, []);
 
-  // ----------------------------------------------------------
-  // WebSocket 连接状态
-  // ----------------------------------------------------------
   const handleWsError = useCallback((message: string) => {
     setWsError(message);
   }, []);
@@ -142,7 +171,6 @@ export default function Home() {
 
     if (!taskId || isTerminal(current.status)) return;
 
-    // 运行中连接意外断开，尝试重新拉取状态并重连
     try {
       const task = await getSpeedTest(taskId);
       applyTask(task);
@@ -150,7 +178,7 @@ export default function Home() {
         setReconnectToken((token) => token + 1);
       }
     } catch {
-      // 拉取失败，保持现状，交由用户手动重试
+      // 拉取失败，保持现状
     }
   }, [applyTask]);
 
@@ -189,14 +217,73 @@ export default function Home() {
   }, [applyTask]);
 
   // ----------------------------------------------------------
+  // 解析订阅
+  // ----------------------------------------------------------
+  const handleSubscriptionChange = useCallback((value: string) => {
+    setSubscription(value);
+    // 订阅地址变化后，旧的节点列表失效
+    setNodes([]);
+    setSelectedNodeIndices([]);
+    setParseError(null);
+  }, []);
+
+  const handleParse = useCallback(
+    async (parsedSubscription: string, parsedProxy: string) => {
+      setParsing(true);
+      setParseError(null);
+      setSubmitError(null);
+
+      try {
+        const response = await parseSubscription({
+          subscription: parsedSubscription,
+          proxy: parsedProxy || null,
+        });
+        const nodeList = response.nodes;
+        setNodes(nodeList);
+        setSelectedNodeIndices(nodeList.map((node) => node.index));
+      } catch (error: unknown) {
+        const message =
+          error instanceof ApiError ? error.message : "解析订阅失败";
+        setParseError(message);
+        setNodes([]);
+        setSelectedNodeIndices([]);
+      } finally {
+        setParsing(false);
+      }
+    },
+    [],
+  );
+
+  // ----------------------------------------------------------
   // 开始测速
   // ----------------------------------------------------------
-  const handleStart = useCallback(async (request: SpeedTestRequest) => {
+  const handleStart = useCallback(async () => {
+    if (nodes.length === 0) {
+      setSubmitError("请先解析订阅，获取节点列表");
+      return;
+    }
+    if (selectedNodeIndices.length === 0) {
+      setSubmitError("至少选择一个节点");
+      return;
+    }
+    const tests = buildTestsFromIds(selectedTestIds);
+    if (tests.length === 0) {
+      setSubmitError("至少选择一个测试项目");
+      return;
+    }
+
     setSubmitError(null);
     setWsError(null);
 
     try {
-      const created = await createSpeedTest(request);
+      const created = await createSpeedTest({
+        subscription: subscription.trim(),
+        proxy: proxy.trim() || null,
+        tests,
+        sort_by: sortBy,
+        reverse,
+        node_indices: selectedNodeIndices,
+      });
       localStorage.setItem(STORAGE_KEY, created.task_id);
       setState({
         taskId: created.task_id,
@@ -220,10 +307,10 @@ export default function Home() {
         error: message,
       }));
     }
-  }, []);
+  }, [nodes, selectedNodeIndices, selectedTestIds, subscription, proxy, sortBy, reverse]);
 
   // ----------------------------------------------------------
-  // 重新测速：清空结果，保留表单配置
+  // 重新测速
   // ----------------------------------------------------------
   const handleReset = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -257,14 +344,112 @@ export default function Home() {
           </p>
         </header>
 
-        <main className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {/* 左侧：配置 */}
-          <section>
-            <SpeedTestForm onStart={handleStart} running={running} />
+        <main className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          {/* 左列：订阅 + 节点选择 */}
+          <section className="flex flex-col gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>订阅配置</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <SubscriptionInput
+                  subscription={subscription}
+                  proxy={proxy}
+                  onSubscriptionChange={handleSubscriptionChange}
+                  onProxyChange={setProxy}
+                  onParse={handleParse}
+                  parsing={parsing}
+                  disabled={running}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>节点选择</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  默认全选，可搜索筛选后手动选择
+                </p>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {parseError ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="size-4" />
+                    <AlertTitle>订阅解析失败</AlertTitle>
+                    <AlertDescription className="break-words">
+                      {parseError}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <NodeSelector
+                  nodes={nodes}
+                  selectedIndices={selectedNodeIndices}
+                  onSelectionChange={setSelectedNodeIndices}
+                  disabled={running}
+                />
+              </CardContent>
+            </Card>
           </section>
 
-          {/* 右侧：状态 / 结果 */}
+          {/* 右列：测速配置 + 进度/结果 */}
           <section className="flex flex-col gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>测速配置</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-5">
+                <SortSelector
+                  sortBy={sortBy}
+                  onSortByChange={setSortBy}
+                  reverse={reverse}
+                  onReverseChange={setReverse}
+                  disabled={running}
+                />
+                <Separator />
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium leading-none">
+                      测试项目
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      已选 {buildTestsFromIds(selectedTestIds).length} 项
+                    </span>
+                  </div>
+                  <TestSelector
+                    selectedIds={selectedTestIds}
+                    onToggle={(id) =>
+                      setSelectedTestIds((prev) =>
+                        prev.includes(id)
+                          ? prev.filter((item) => item !== id)
+                          : [...prev, id],
+                      )
+                    }
+                    disabled={running}
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  size="lg"
+                  className="w-full"
+                  disabled={running}
+                  onClick={handleStart}
+                >
+                  {running ? (
+                    <>
+                      <Loader2 className="animate-spin" />
+                      测速中…
+                    </>
+                  ) : (
+                    <>
+                      <Play />
+                      开始测速
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+
             {submitError ? (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
@@ -288,7 +473,7 @@ export default function Home() {
             {state.status === "idle" ? (
               <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed p-10 text-center">
                 <p className="text-sm text-muted-foreground">
-                  填写左侧配置并点击「开始测速」，结果将在这里显示
+                  输入订阅并解析，配置好测速项后点击「开始测速」，结果将在这里显示
                 </p>
               </div>
             ) : null}

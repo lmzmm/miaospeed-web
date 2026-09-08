@@ -14,7 +14,8 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from models import TestItem
+from clash import load_clash_proxies_source
+from models import Node, TestItem
 from renderer import RESULT_DIR
 from service import SpeedTestService
 from task.manager import (
@@ -104,6 +105,38 @@ class SpeedTestRequest(BaseModel):
     # false = 正序
     # true  = 倒序
     reverse: bool = False
+
+    # 可选：
+    # 只测试指定下标的节点（下标来自 /parse 返回的 index）。
+    # None 表示测试全部节点。
+    node_indices: list[int] | None = None
+
+
+# ============================================================
+# ParseRequest
+# ============================================================
+
+class ParseRequest(BaseModel):
+
+    # Clash / Mihomo 订阅 URL
+    subscription: str
+
+    # 可选：用于下载订阅的代理
+    proxy: str | None = None
+
+
+def serialize_node(
+    node: Node,
+) -> dict[str, Any]:
+
+    return {
+        "index": node.index,
+        "name": node.name,
+        "type": node.type,
+        "server": node.server,
+        "port": node.port,
+        "address": node.address,
+    }
 
 
 # ============================================================
@@ -239,6 +272,53 @@ def create_router(
     )
 
     # ========================================================
+    # 解析订阅，返回节点列表
+    # ========================================================
+
+    @router.post("/parse")
+    async def parse_subscription(
+        request: ParseRequest,
+    ):
+
+        validate_subscription_url(
+            request.subscription
+        )
+
+        validate_proxy(
+            request.proxy
+        )
+
+        try:
+
+            nodes = (
+                await load_clash_proxies_source(
+                    request.subscription,
+                    proxy=request.proxy,
+                )
+            )
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"订阅解析失败: {e}",
+            ) from e
+
+        if not nodes:
+
+            raise HTTPException(
+                status_code=400,
+                detail="没有找到有效节点",
+            )
+
+        return {
+            "nodes": [
+                serialize_node(node)
+                for node in nodes
+            ],
+        }
+
+    # ========================================================
     # 创建测速任务
     # ========================================================
 
@@ -296,6 +376,20 @@ def create_router(
             )
 
         # ----------------------------------------------------
+        # node_indices
+        # ----------------------------------------------------
+
+        if (
+            request.node_indices is not None
+            and not request.node_indices
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail="至少选择一个节点",
+            )
+
+        # ----------------------------------------------------
         # 创建任务
         # ----------------------------------------------------
 
@@ -320,6 +414,8 @@ def create_router(
                 reverse=request.reverse,
 
                 proxy=request.proxy,
+
+                node_indices=request.node_indices,
             )
         )
 

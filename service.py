@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from clash import load_clash_proxies_source
 from miaospeed_client import MiaoSpeedClient
 from models import (
+    Node,
     TestItem,
     TestResult,
 )
@@ -42,6 +44,7 @@ class SpeedTestService:
         sort_by: str = "订阅原序",
         reverse: bool = False,
         proxy: str | None = None,
+        node_indices: list[int] | None = None,
     ):
 
         try:
@@ -66,6 +69,32 @@ class SpeedTestService:
                 file_path,
                 proxy=proxy,
             )
+
+            # -------------------------------------------------
+            # 过滤节点
+            #
+            # node_indices 来自 /parse 返回的 index，
+            # 过滤后重新编号，保证后续按顺序测速。
+            # -------------------------------------------------
+
+            if node_indices is not None:
+
+                filtered: list[Node] = []
+
+                for new_index, old_index in enumerate(
+                    node_indices
+                ):
+
+                    if 0 <= old_index < len(nodes):
+
+                        filtered.append(
+                            replace(
+                                nodes[old_index],
+                                index=new_index,
+                            )
+                        )
+
+                nodes = filtered
 
             if not nodes:
 
@@ -320,7 +349,9 @@ class SpeedTestService:
                     # PNG + JSON
                     # =================================================
 
-                    renderer = ResultRenderer()
+                    renderer = ResultRenderer(
+                        report_id=task_id,
+                    )
 
                     image_path = (
                         renderer.render(
@@ -445,7 +476,9 @@ class SpeedTestService:
                     table.results,
                 )
 
-                renderer = ResultRenderer()
+                renderer = ResultRenderer(
+                    report_id=task_id,
+                )
 
                 image_path = (
                     renderer.render(

@@ -1,4 +1,5 @@
 import type {
+  ParseResponse,
   SpeedTestCreateResponse,
   SpeedTestRequest,
   SpeedTestTask,
@@ -98,6 +99,27 @@ export async function createSpeedTest(
   });
 
   return handleResponse<SpeedTestCreateResponse>(response);
+}
+
+/**
+ * 解析订阅，返回节点列表。
+ */
+export async function parseSubscription(input: {
+  subscription: string;
+  proxy?: string | null;
+}): Promise<ParseResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/api/speedtest/parse`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      subscription: input.subscription,
+      proxy: input.proxy ?? null,
+    }),
+  });
+
+  return handleResponse<ParseResponse>(response);
 }
 
 export async function getSpeedTest(

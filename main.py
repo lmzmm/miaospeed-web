@@ -1,5 +1,30 @@
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+
+# ============================================================
+# Windows 控制台编码
+#
+# 默认 GBK 无法编码节点名中的 emoji（如国旗 🇭🇰），
+# 会导致 print 抛 UnicodeEncodeError 使任务失败。
+# 统一改为 UTF-8，编码失败时用替换符兜底，避免崩溃。
+# ============================================================
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+
+    sys.stdout.reconfigure(
+        encoding="utf-8",
+        errors="replace",
+    )
+
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+
+    sys.stderr.reconfigure(
+        encoding="utf-8",
+        errors="replace",
+    )
 
 from api.speedtest import (
     create_router,

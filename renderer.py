@@ -428,6 +428,7 @@ class ResultRenderer:
     def __init__(
         self,
         output_dir: str | Path = RESULT_DIR,
+        report_id: str | None = None,
     ):
 
         self.output_dir = Path(
@@ -439,9 +440,11 @@ class ResultRenderer:
             exist_ok=True,
         )
 
-        # 输出文件名：日期命名
+        # 输出文件名：优先使用传入的 report_id（如 task_id），
+        # 否则回退到日期命名。
         self.report_id = (
-            datetime.now().strftime(
+            report_id
+            or datetime.now().strftime(
                 "%Y-%m-%d_%H-%M-%S"
             )
         )

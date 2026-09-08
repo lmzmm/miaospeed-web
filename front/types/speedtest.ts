@@ -39,6 +39,8 @@ export interface SpeedTestRequest {
   tests: TestItem[];
   sort_by: SortByValue;
   reverse: boolean;
+  /** 只测试指定下标的节点（下标来自 /parse 返回的 index）；null 表示全部 */
+  node_indices?: number[] | null;
 }
 
 /**
@@ -60,6 +62,25 @@ export interface SpeedTestCreateResponse {
   sort_by: string;
   reverse: boolean;
   image: string;
+}
+
+/**
+ * /api/speedtest/parse 返回的单个节点。
+ */
+export interface ParsedNode {
+  index: number;
+  name: string;
+  type: string;
+  server: string;
+  port: number | null;
+  address: string;
+}
+
+/**
+ * /api/speedtest/parse 的返回。
+ */
+export interface ParseResponse {
+  nodes: ParsedNode[];
 }
 
 /**

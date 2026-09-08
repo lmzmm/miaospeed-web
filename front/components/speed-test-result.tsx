@@ -97,7 +97,7 @@ export function SpeedTestResult({ state, onReset }: SpeedTestResultProps) {
                 }}
               >
                 <ExternalLink />
-                新窗口查看
+                下载
               </Button>
             </div>
           </div>
