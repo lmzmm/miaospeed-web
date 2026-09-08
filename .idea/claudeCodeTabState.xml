@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ClaudeCodeTabState">
+    <option name="tabSessions">
+      <map>
+        <entry key="0">
+          <value>
+            <TabSessionState>
+              <option name="provider" value="claude" />
+              <option name="sessionId" value="0c6b69b9-1cdc-4fb6-840c-51aca8795646" />
+              <option name="cwd" value="E:\项目\speedtest" />
+              <option name="model" value="claude-opus-4-8" />
+              <option name="permissionMode" value="acceptEdits" />
+            </TabSessionState>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
