@@ -4,15 +4,30 @@ from miaospeedlib.backend import (
 )
 
 
+# ============================================================
+# Web 服务
+# ============================================================
+
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 8000
+
+
+# ============================================================
+# MiaoSpeed 服务端
+# ============================================================
+
+MIAOSPEED_BIND = "127.0.0.1:8765"
+MIAOSPEED_TOKEN = "9876543210"
+
+
 MIAOSPEED_CONFIG = MiaoSpeedSlave(
     id="local",
     comment="Local",
     hidden=False,
 
-    # 修改成你的实际 Token
-    token="9876543210",
+    token=MIAOSPEED_TOKEN,
     type="miaospeed",
-    address="127.0.0.1:8765",
+    address=MIAOSPEED_BIND,
 
     option=MiaoSpeedOption(
         downloadDuration=8,

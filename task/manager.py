@@ -123,6 +123,23 @@ class TaskManager:
                 results
             )
 
+    async def set_report_file(
+        self,
+        task_id: str,
+        report_file: str,
+    ):
+
+        async with self.lock:
+
+            task = self.tasks.get(
+                task_id
+            )
+
+            if task is None:
+                return
+
+            task.report_file = report_file
+
     async def subscribe(
         self,
         task_id: str,

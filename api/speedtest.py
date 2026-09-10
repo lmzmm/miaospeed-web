@@ -527,9 +527,14 @@ def create_router(
                 ),
             )
 
+        report_file = (
+            task.report_file
+            or task_id
+        )
+
         image_path = (
             Path(RESULT_DIR)
-            / f"{task_id}.png"
+            / f"{report_file}.png"
         )
 
         if not image_path.exists():
@@ -545,7 +550,7 @@ def create_router(
             path=image_path,
             media_type="image/png",
             filename=(
-                f"{task_id}.png"
+                f"{report_file}.png"
             ),
         )
 

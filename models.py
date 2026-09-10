@@ -97,3 +97,5 @@ class SpeedTestTask:
     )
 
     error: str | None = None
+
+    report_file: str | None = None

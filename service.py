@@ -365,6 +365,11 @@ class SpeedTestService:
                         )
                     )
 
+                    await self.task_manager.set_report_file(
+                        task_id,
+                        renderer.report_id,
+                    )
+
                     # =================================================
                     # 完成消息
                     # =================================================
@@ -490,6 +495,11 @@ class SpeedTestService:
                     renderer.save_json(
                         table
                     )
+                )
+
+                await self.task_manager.set_report_file(
+                    task_id,
+                    renderer.report_id,
                 )
 
                 await self.task_manager.publish(

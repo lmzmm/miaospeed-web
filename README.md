@@ -4,8 +4,9 @@ Clash / Mihomo 节点测速工具。输入订阅链接，解析并选择需要�
 ## 项目结构
 
 ```
-speedtest/
+miaospeed-web/
 ├── main.py                 # FastAPI 入口（含 CORS / 编码配置）
+├── config.py               # 所有配置项（端口、Token、测速参数）
 ├── service.py              # 测速服务：加载节点、调用 MiaoSpeed、渲染结果
 ├── api/speedtest.py        # 路由：创建任务、解析订阅、查询任务、结果图片、WebSocket
 ├── task/manager.py         # 任务管理器（内存任务表 + 订阅发布）
@@ -36,23 +37,21 @@ speedtest/
 ## 后端启动
 
 ```bash
-cd E:\项目\speedtest
-
 # 安装依赖
 pip install fastapi uvicorn aiohttp pyyaml miaospeedlib
 
 # 启动（默认 http://127.0.0.1:8000）
 python main.py
-# 或
-uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+> 端口、Token 等配置项在 `config.py` 中修改，详见「可配置参数」章节。
 
 健康检查：`GET http://127.0.0.1:8000/health`
 
 ## 前端启动
 
 ```bash
-cd E:\项目\speedtest\front
+cd front
 
 npm install
 npm run dev          # http://localhost:3000
@@ -67,14 +66,16 @@ npm run start
 
 ### 环境变量
 
-前端通过环境变量指定后端地址，未配置时默认 `http://127.0.0.1:8000`：
+前端通过环境变量指定后端地址，未配置时默认同源（与前端同端口）：
 
 ```bash
 # front/.env.local
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-参考 `front/.env.local.example`。WebSocket 地址会自动从 HTTP 地址转换（`http` → `ws`，`https` → `wss`）。
+> 打包模式下无需配置；开发模式下前端和后端端口不同，需设置此变量。
+
+WebSocket 地址会自动从 HTTP 地址转换（`http` → `ws`，`https` → `wss`）。
 
 ## API 概览
 
@@ -135,6 +136,49 @@ Content-Type: application/json
 
 - 任务状态保存在后端内存中，重启后端会丢失未完成任务
 - 结果 PNG/JSON 输出到 `results/` 目录，以 `task_id` 命名
+
+## 可配置参数
+
+所有 Python 端配置项集中在 `config.py` 中，修改后需重启服务生效。
+
+### Web 服务
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `WEB_HOST` | `0.0.0.0` | Web 服务监听地址 |
+| `WEB_PORT` | `8000` | Web 服务监听端口 |
+
+### MiaoSpeed 服务端
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `MIAOSPEED_BIND` | `127.0.0.1:8765` | MiaoSpeed 服务端监听地址 |
+| `MIAOSPEED_TOKEN` | `9876543210` | MiaoSpeed 服务端连接 Token |
+
+### MiaoSpeed 测速配置（`MIAOSPEED_CONFIG`）
+
+`MIAOSPEED_CONFIG.token` 和 `MIAOSPEED_CONFIG.address` 自动引用上方常量，无需重复修改。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `downloadDuration` | `8` | 下载测速持续时间（秒） |
+| `downloadThreading` | `4` | 下载测速并发线程数 |
+| `pingAverageOver` | `5` | Ping 取平均的次数 |
+| `taskRetry` | `3` | 单节点测试失败重试次数 |
+| `downloadURL` | Google 下载链接 | 下载测速使用的目标 URL |
+| `pingAddress` | Cloudflare 204 | Ping 测试使用的目标地址 |
+| `stunURL` | stunprotocol.org | STUN 服务器地址，用于 NAT 类型检测 |
+| `taskTimeout` | `5000` | 单个任务超时时间（毫秒） |
+| `dnsServer` | `[]` | 自定义 DNS 服务器列表，空表示使用系统默认 |
+| `skipCertVerify` | `True` | 是否跳过 TLS 证书验证 |
+| `tls` | `False` | 是否使用 TLS 连接 MiaoSpeed 服务端 |
+| `buildtoken` | — | MiaoSpeed 授权 buildtoken |
+
+### 前端环境变量（`front/.env.local`）
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | 空（同源） | 后端 API 地址。打包模式下无需配置；开发模式下需设为 `http://127.0.0.1:8000` |
 
 ## 打包为单个可执行文件
 
@@ -218,9 +262,11 @@ pyinstaller --onefile --name miaospeed-web ^
 打包完成后，`dist/miaospeed-web.exe` 即为最终产物。双击运行后：
 
 1. 自动启动内置的 MiaoSpeed 服务端（后台进程）
-2. FastAPI 启动，监听 `0.0.0.0:8000`
+2. FastAPI 启动，监听地址和端口见 `config.py` 中的 `WEB_HOST` / `WEB_PORT`
 3. 浏览器访问 `http://localhost:8000` 即可使用
 4. 关闭程序时自动停止 MiaoSpeed 服务端
+
+> 需要修改端口或 Token 等配置时，先编辑 `config.py` 再重新打包。
 
 ### 常见问题
 

@@ -440,12 +440,10 @@ class ResultRenderer:
             exist_ok=True,
         )
 
-        # 输出文件名：优先使用传入的 report_id（如 task_id），
-        # 否则回退到日期命名。
+        # 输出文件名：始终使用日期命名。
         self.report_id = (
-            report_id
-            or datetime.now().strftime(
-                "%Y-%m-%d_%H-%M-%S"
+            datetime.now().strftime(
+                "%Y-%m-%d %H-%M-%S"
             )
         )
 

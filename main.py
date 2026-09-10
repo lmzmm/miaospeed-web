@@ -35,6 +35,13 @@ from api.speedtest import (
     create_router,
 )
 
+from config import (
+    MIAOSPEED_BIND,
+    MIAOSPEED_TOKEN,
+    WEB_HOST,
+    WEB_PORT,
+)
+
 from service import (
     SpeedTestService,
 )
@@ -57,9 +64,6 @@ def resource_path(relative_path: str) -> str:
 # 自动启动内置的 miaospeed 服务端进程，
 # 程序退出时自动清理。
 # ============================================================
-
-MIAOSPEED_BIND = "127.0.0.1:8765"
-MIAOSPEED_TOKEN = "9876543210"
 
 _miaospeed_process: subprocess.Popen | None = None
 
@@ -214,6 +218,6 @@ if __name__ == "__main__":
 
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=WEB_HOST,
+        port=WEB_PORT,
     )
