@@ -495,7 +495,7 @@ export default function Home() {
 
         <footer className="mt-8 border-t pt-4 text-center text-xs text-muted-foreground">
           MiaoSpeed SpeedTest · 后端地址{" "}
-          {process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000"}
+          {process.env.NEXT_PUBLIC_API_BASE_URL || "同源"}
         </footer>
       </div>
     </div>

@@ -9,12 +9,12 @@ import type {
 // API 基础地址
 //
 // 统一通过环境变量 NEXT_PUBLIC_API_BASE_URL 配置，
-// 未配置时默认 http://127.0.0.1:8000 。
+// 未配置时默认使用相对路径（与前端同源同端口）。
 // ============================================================
 
 export function getApiBaseUrl(): string {
   const base =
-    process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+    process.env.NEXT_PUBLIC_API_BASE_URL || "";
   return base.replace(/\/+$/, "");
 }
 
@@ -158,6 +158,15 @@ export function getSpeedTestImageUrl(
  */
 export function createWebSocketUrl(taskId: string): string {
   const base = getApiBaseUrl();
-  const wsBase = base.replace(/^http/i, "ws");
+  let wsBase: string;
+
+  if (base) {
+    wsBase = base.replace(/^http/i, "ws");
+  } else {
+    // 同源模式：从当前页面地址推导
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    wsBase = `${proto}//${location.host}`;
+  }
+
   return `${wsBase}/api/speedtest/ws/${encodeURIComponent(taskId)}`;
 }

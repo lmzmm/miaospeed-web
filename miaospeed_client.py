@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 import aiohttp
@@ -15,13 +17,14 @@ from tests import build_matrices
 # 路径
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+def _resource_path(relative_path: str) -> Path:
+    """获取资源文件路径，兼容 PyInstaller 打包。"""
+    if hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).resolve().parent / relative_path
 
-SCRIPT_DIR = (
-    BASE_DIR
-    / "scripts"
-    / "builtin"
-)
+
+SCRIPT_DIR = _resource_path("scripts/builtin")
 
 # 单个脚本最大执行时间：
 # 这里给 30 秒，避免某个脚本异常时无限等待。

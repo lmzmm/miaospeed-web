@@ -1,2 +1,6 @@
 /results/
 /sub.yaml
+/build/
+/dist/
+/miaospeed-web.spec
+/miaospeed-windows-amd64.exe
