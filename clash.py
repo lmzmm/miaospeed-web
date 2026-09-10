@@ -327,6 +327,12 @@ async def download_subscription(
             ) from e
 
 
+def is_url(value: str) -> bool:
+    """判断输入是否是 http/https 链接。"""
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 async def load_clash_proxies_source(
     source: str,
     proxy: str | None = None,
@@ -339,16 +345,12 @@ async def load_clash_proxies_source(
 
     本地路径:
         读取 YAML
+
+    其他（原始内容）:
+        直接解析
     """
 
-    parsed = urlparse(
-        source
-    )
-
-    if parsed.scheme in {
-        "http",
-        "https",
-    }:
+    if is_url(source):
 
         content = await download_subscription(
             source,
@@ -363,8 +365,21 @@ async def load_clash_proxies_source(
             config
         )
 
-    return load_clash_proxies(
+    path = Path(source)
+
+    if path.exists():
+
+        return load_clash_proxies(
+            source
+        )
+
+    # 原始订阅内容，直接解析
+    config = load_yaml_text(
         source
+    )
+
+    return parse_clash_proxies(
+        config
     )
 
 

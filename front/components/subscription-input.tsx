@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Search } from "lucide-react";
 
 import { isValidHttpUrl } from "@/lib/utils";
@@ -39,8 +40,6 @@ export function SubscriptionInput({
     const subscriptionTrimmed = subscription.trim();
     if (!subscriptionTrimmed) {
       nextErrors.subscription = "订阅地址不能为空";
-    } else if (!isValidHttpUrl(subscriptionTrimmed)) {
-      nextErrors.subscription = "订阅地址必须是 http 或 https URL";
     }
 
     const proxyTrimmed = proxy.trim();
@@ -62,19 +61,20 @@ export function SubscriptionInput({
       {/* 订阅地址 */}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="subscription">订阅地址</Label>
-        <Input
+        <Textarea
           id="subscription"
           value={subscription}
           onChange={(event) => onSubscriptionChange(event.target.value)}
-          placeholder="https://example.com/subscribe"
+          placeholder="https://example.com/subscribe 或直接粘贴订阅内容"
           disabled={disabled || parsing}
           aria-invalid={Boolean(errors.subscription)}
+          rows={4}
         />
         {errors.subscription ? (
           <p className="text-xs text-destructive">{errors.subscription}</p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            支持 Clash / Mihomo 订阅链接
+            支持 Clash / Mihomo 订阅链接或原始订阅内容
           </p>
         )}
       </div>

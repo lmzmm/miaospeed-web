@@ -198,32 +198,28 @@ def parse_test_items(
 # URL 校验
 # ============================================================
 
-def validate_subscription_url(
+def validate_subscription(
     value: str,
 ):
-    parsed = urlparse(
-        value
-    )
+    from clash import is_url
 
-    if parsed.scheme not in {
-        "http",
-        "https",
-    }:
+    if not value.strip():
 
         raise HTTPException(
             status_code=400,
-            detail=(
-                "subscription 必须是 "
-                "http 或 https URL"
-            ),
+            detail="subscription 不能为空",
         )
 
-    if not parsed.netloc:
+    if is_url(value):
 
-        raise HTTPException(
-            status_code=400,
-            detail="subscription URL 无效",
-        )
+        parsed = urlparse(value)
+
+        if not parsed.netloc:
+
+            raise HTTPException(
+                status_code=400,
+                detail="subscription URL 无效",
+            )
 
 
 def validate_proxy(
@@ -280,7 +276,7 @@ def create_router(
         request: ParseRequest,
     ):
 
-        validate_subscription_url(
+        validate_subscription(
             request.subscription
         )
 
@@ -331,7 +327,7 @@ def create_router(
         # subscription URL
         # ----------------------------------------------------
 
-        validate_subscription_url(
+        validate_subscription(
             request.subscription
         )
 
